@@ -10,7 +10,7 @@ output:
 ```{r 1, echo=FALSE}
 library("seqinr")
 library("Biostrings")
-#echi<- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_france.fasta")
+#echi<- read.fasta("C:/Users/...")
 echiseq <- echi[[1]]
 ```
 
@@ -389,7 +389,7 @@ legend("bottomleft",legend=count(echiseq,1,freq=T),bty="n",fill=c("tomato2","pal
 
 ```{r 12 , echo=FALSE}
 #usa
-echi_usa <- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_usa.fasta")
+echi_usa <- read.fasta("C:/Users/...")
 echi_usaseq <- echi_usa[[1]]
 mylist <- list(length(echi_usaseq), count(echi_usaseq,1,freq=T))
 nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
@@ -401,7 +401,7 @@ legend("bottomleft",legend=count(echi_usaseq,1,freq=T),bty="n",fill=c("tomato2",
 
 ```{r 13, echo=FALSE}
 #China
-echi_china <- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_china.fasta")
+echi_china <- read.fasta("C:/Users/...")
 echi_chinaseq <- echi_china[[1]]
 mylist <- list(length(echi_chinaseq), count(echi_chinaseq,1,freq=T))
 nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
@@ -413,7 +413,7 @@ legend("bottomleft",legend=count(echi_chinaseq,1,freq=T),bty="n",fill=c("tomato2
 
 ```{r 14, echo=FALSE}
 #eslováquia
-echi_eslov <- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_eslováquia.fasta")
+echi_eslov <- read.fasta("C:/Users/...")
 echi_eslovseq <- echi_eslov[[1]]
 mylist <- list(length(echi_eslovseq), count(echi_eslovseq,1,freq=F))
 nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
@@ -425,7 +425,7 @@ legend("bottomleft",legend=count(echi_eslovseq,1,freq=T),bty="n",fill=c("tomato2
 
 ```{r 15 , echo=FALSE}
 #cazaquistão
-echi_kazak <- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_kazak.fasta")
+echi_kazak <- read.fasta("C:/Users/...")
 echi_kazakseq <- echi_kazak[[1]]
 mylist <- list(length(echi_kazakseq), count(echi_kazakseq,1,freq=F))
 nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
