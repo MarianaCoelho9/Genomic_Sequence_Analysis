@@ -1,0 +1,1126 @@
+---
+title: "Echinococcosis"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+
+
+```{r 1, echo=FALSE}
+library("seqinr")
+library("Biostrings")
+#echi<- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_france.fasta")
+echiseq <- echi[[1]]
+```
+
+
+
+
+```{r 3, echo=TRUE}
+codoes<-count(echiseq,3,freq=T) #Calcula a frequência de tripletos na echiseq
+sort(codoes,decreasing = TRUE)[1:5] #Apresenta os 5 tripletos mais abundantes na echiseq
+```
+
+
+```{r 4, echo=TRUE}
+
+#Função usada para encontrar os potenciais tripletos de início e fim
+findPotentialStartsAndStops <- function(sequence)
+  {
+     # Definir um vetor com as sequências dos tripletos potenciais de início (atg) e fim (taa, tag e tga)
+     codons<- c("atg", "taa", "tag", "tga")
+     for (i in 1:4)
+     {
+        codon <- codons[i]
+        # Encontra todas as ocorrências do tripleto definido acima , na sequência total
+        occurrences <- matchPattern(codon, sequence)
+        # Encontra a posição de início de cada ocorrência (posição da primeira base)
+        codonpositions <-start(occurrences)
+        # Encontra o número total de ocorrências através do comprimento do vetor que contém a posição inicial de cada uma
+        numoccurrences <- length(codonpositions)
+        if (i == 1)
+        {
+
+           positions <- codonpositions
+           # Replica o tripleto, tantas vezes quantas as numoccurences
+           types <- rep(codon, numoccurrences)
+        }
+        else
+        {
+           #Incrementa o vetor codonpositions no final do vetor "positions":
+           positions   <- append(positions, codonpositions, after=length(positions))
+           # Incrementa o vetor "rep" no final do vetor "types":
+           types       <- append(types, rep(codon, numoccurrences), after=length(types))
+           
+        }
+     }
+     # Ordena os vetores "positions" e "types" segundo a ordem crescente das posições em que os codões aparecem na sequência completa
+     indices <- order(positions)
+     positions <- positions[indices]
+     types <- types[indices]
+     # Retorna uma lista contendo as variávies "positions" and "types":
+     mylist <- list(positions,types)
+     return(mylist)
+}
+
+```
+
+```{r 5, echo=TRUE}
+findORFsinSeq <- function(sequence)
+  {
+     require(Biostrings)
+     # cria um vetor com a lista retornada da função findPotentialStartsAndStops(sequence)
+     mylist <- findPotentialStartsAndStops(sequence)
+     positions <- mylist[[1]]
+     types <- mylist[[2]]
+     # Inicializa os vetores orfstarts, orfstops e orflengths
+     orfstarts <- numeric()
+     orfstops <- numeric()
+     orflengths <- numeric()
+    
+     numpositions <- length(positions)
+     # Tem de haver pelo menos um tripleto de iniciação e um de stop para existir um ORF
+     if (numpositions >= 2)
+     {
+       #ciclo i procura tripletos de iniciação e ciclo j procura tripletos de finalização 
+       for (i in 1:(numpositions-1)) #-1 porque não interessa ter um tripleto de inicialização no último tripleto
+        {
+           posi <- positions[i]
+           typei <- types[i]
+           found <- 0
+           while (found == 0)
+           {
+              for (j in (i+1):numpositions) #+1 porque não interessa ter um tripleto de finalização no primeiro tripleto
+              {
+                 posj  <- positions[j]
+                 typej <- types[j]
+                 posdiff <- posj - posi
+                 posdiffmod3 <- posdiff %% 3 # Para verificar que se trata de uma ORF entre a posição do tripleto inicial e do tripleto final, o número de bases tem de ser mútiplo de 3, logo o resto da sua divisão interira tem de ser igual a 0 
+                 orflength <- posj - posi + 3
+                 if (typei == "atg" && (typej == "taa" || typej == "tag" || typej == "tga") && posdiffmod3 == 0)
+                 {
+                    # Check if we have already used the stop codon at posj+2 in an ORF
+                    numorfs <- length(orfstops)
+                    usedstop <- -1
+                    if (numorfs > 0)
+                    {
+                      for (k in 1:numorfs)
+                      {
+                          orfstopk <- orfstops[k]
+                          if (orfstopk == (posj + 2)) { usedstop <- 1 }
+                      }
+                    }
+                    if (usedstop == -1)
+                    {
+                       orfstarts <- append(orfstarts, posi, after=length(orfstarts)) #Guarda a posição da primeira base do tripleto de iniciação no final do vetor orfstarts
+                       orfstops <- append(orfstops, posj+2, after=length(orfstops)) # Guarda a posição da terceira base do tripleto de finalização no final do vetor orfstops
+                       orflengths <- append(orflengths, orflength, after=length(orflengths)) #Guarda o comprimento da ORF formada pelo tripleto de inicialização e finalização
+                    }
+                    found <- 1
+                    break
+                 }
+                 if (j == numpositions) { found <- 1 }
+              }
+           }
+        }
+     }
+     # Sort the final ORFs by start position:
+     indices <- order(orfstarts)
+     orfstarts <- orfstarts[indices]
+     orfstops <- orfstops[indices]
+     # Find the lengths of the ORFs that we have
+     orflengths <- numeric()
+     numorfs <- length(orfstarts)
+     max=0
+     for (i in 1:numorfs)
+     {
+        orfstart <- orfstarts[i]
+        orfstop <- orfstops[i]
+        orflength <- orfstop - orfstart + 1
+        if( orflength>max)
+        {
+          inicial=orfstart
+          final=orfstop
+          max=orflength
+        }
+        
+     }
+     mylist <- list(inicial, final, max)
+     return(mylist)
+}
+
+```
+
+```{r 6, echo=TRUE} 
+my_ORF <- function(sequence)
+{
+  #1º cadeia da molécula de DNA
+  forward <- c2s(sequence)
+  #2º cadeia da molécula de DNA
+  forwardvector <- s2c(forward)
+  complement <- comp(forwardvector)# cria o (complementar da 1º cadeia)= 2º cadeia     
+  reversevector <- rev(complement)# inverter a 2º cadeia para ficar no sentido 5' para 3'
+  reverse <- c2s(reversevector)
+  x<-findORFsinSeq(forward)
+  y<-findORFsinSeq(reverse)
+  if (x[[3]]>y[[3]])
+  {
+    myorf <- substring(forward, x[[1]], x[[2]])
+    comprimento<-x[[3]]
+    pos_i<-x[[1]]
+    pos_f<-x[[2]]
+  }else
+  {
+    myorf <- substring(reverse, y[[1]], y[[2]])
+    comprimento<-y[[3]]
+    pos_i<-y[[1]]
+    pos_f<-y[[2]]
+  }
+  myorfvector <- s2c(myorf)
+  dnatomrna<- sub("t","u",myorfvector) #permite realizar a transcrição de dna para mrna
+  mrna <- c2s(dnatomrna)
+  proteinas<-seqinr::translate(myorfvector)#permite realizar a tradução de dna para proteina
+  mylist <- list(myorf,pos_i,pos_f, comprimento,mrna,proteinas)
+  nomes<-c("ORF(DNA):", "Posição Codão inicial:", "Posição Codão final:","Comprimento ORF:", "ORF(mRNA):", "ORF(Proteínas):")
+  names(mylist)<-nomes
+  return(mylist)
+}
+```
+
+
+
+
+```{r 6.1 , echo=FALSE}
+my_ORF(echiseq)
+```
+
+
+```{r 7, echo=FALSE}
+findORFsinSeq2 <- function(sequence)
+  {
+     require(Biostrings)
+     # cria um vetor com a lista retornada da função findPotentialStartsAndStops(sequence)
+     mylist <- findPotentialStartsAndStops(sequence)
+     positions <- mylist[[1]]
+     types <- mylist[[2]]
+     # Inicializa os vetores orfstarts, orfstops e orflengths
+     orfstarts <- numeric()
+     orfstops <- numeric()
+     orflengths <- numeric()
+     numpositions <- length(positions)
+     # Tem de haver pelo menos um tripleto de iniciação e um de stop para existir um ORF
+     if (numpositions >= 2)
+     {
+        for (i in 1:(numpositions-1))#ciclo i procura tripletos de iniciação e ciclo j procura tripletos de finalização
+                                      #-1 porque não interessa ter um tripleto de inicialização no último tripleto
+        {
+           posi <- positions[i]
+           typei <- types[i]
+           found <- 0
+           while (found == 0)
+           {
+              for (j in (i+1):numpositions) #+1 porque não interessa ter um tripleto de finalização no primeiro tripleto
+              {
+                 posj  <- positions[j]
+                 typej <- types[j]
+                 posdiff <- posj - posi
+                 posdiffmod3 <- posdiff %% 3 # Para verificar que se trata de uma ORF entre a posição do tripleto inicial e do tripleto final, o número de bases tem de ser mútiplo de 3, logo o resto da sua divisão interira tem de ser igual a 0 
+                 
+                 orflength <- posj - posi + 3
+                 if (typei == "atg" && (typej == "taa" || typej == "tag" || typej == "tga") && posdiffmod3 == 0)
+                 {
+                    # Check if we have already used the stop codon at posj+2 in an ORF
+                    numorfs <- length(orfstops)
+                    usedstop <- -1
+                    if (numorfs > 0)
+                    {
+                      for (k in 1:numorfs)
+                      {
+                          orfstopk <- orfstops[k]
+                          if (orfstopk == (posj + 2)) { usedstop <- 1 }
+                      }
+                    }
+                    if (usedstop == -1)
+                    {
+                       orfstarts <- append(orfstarts, posi, after=length(orfstarts))
+                       orfstops <- append(orfstops, posj+2, after=length(orfstops)) # Including the stop codon.
+                       orflengths <- append(orflengths, orflength, after=length(orflengths))
+                    }
+                    found <- 1
+                    break
+                 }
+                 if (j == numpositions) { found <- 1 }
+              }
+           }
+        }
+     }
+     # Sort the final ORFs by start position:
+     indices <- order(orfstarts)
+     orfstarts <- orfstarts[indices]
+     orfstops <- orfstops[indices]
+     # Find the lengths of the ORFs that we have
+     orflengths <- numeric()
+     numorfs <- length(orfstarts)
+     for (i in 1:numorfs)
+     {
+        orfstart <- orfstarts[i]
+        orfstop <- orfstops[i]
+        orflength <- orfstop - orfstart + 1
+        orflengths <- append(orflengths,orflength,after=length(orflengths))
+     }
+     mylist <- list(orfstarts, orfstops, orflengths)
+     return(mylist)
+  }
+```
+
+```{r 8, echo=TRUE }
+#Esta função permite gerar X sequencias aleatórias do comprimento da inputsequence, sendo as probabilidades das base definidas, iguais às suas frações na inputsequence
+generateSeqsWithMultinomialModel <- function(inputsequence, X)
+  {
+     require("seqinr") 
+     inputsequencevector <- s2c(inputsequence)
+     mylength <- length(inputsequencevector)
+     mytable <- table(inputsequencevector) #Encontra as frequências de cada base na seq inserida
+     #verifica quais são as letras correspondentes a cada base
+     letters <- rownames(mytable)
+     numletters <- length(letters)
+     probabilities <- numeric() 
+     for (i in 1:numletters)
+     {
+        letter <- letters[i]
+        count <- mytable[[i]]
+        probabilities[i] <- count/mylength #calculo da probabilidade (frequência de cada base/comprimento da seq inserida)
+     }
+     seqs <- numeric(X)
+     # Gera X sequências aleatórias com base nas probabilidades de cada base
+     for (j in 1:X)
+     {
+        seq <- sample(letters, mylength, rep=TRUE, prob=probabilities) #Cria uma sequência tendo em conta as letras usadas (bases) na sequência inicial e as respetivas probabilidades
+        seq <- c2s(seq)
+        seqs[j] <- seq
+     }
+     #Retorna o vetor com as X sequências aleatórias
+     return(seqs)
+  }
+```
+
+
+```{r 9, echo=TRUE}
+# Permite comparar o comprimento dos ORFS encontrados nas sequências aleatórias geradas, com os ORFS encontrados na nossa seq inicial
+LRandomORF <- function(sequence)
+{
+seqstring <- c2s(sequence)           
+mylist <- findORFsinSeq2(seqstring)    # Procura os ORFs gerados na nossa seq inicial
+orflengths <- mylist[[3]]                   # guarda os comprimentos dos ORFs encontrados
+randseqs <- generateSeqsWithMultinomialModel(seqstring, 100) # Gera 100 seq aleatórias recorrendo à função generateSeqsWithMultinomialModel
+randseqorflengths <- numeric()             
+for (i in 1:100)
+  {
+     
+     randseq <- randseqs[i]                    
+     mylist <- findORFsinSeq2(randseq)           # encontra ORFs em cada seq gerada
+     lengths <- mylist[[3]]                     # guarda os comprimentos dos ORFs encontrados
+     randseqorflengths <- append(randseqorflengths, lengths, after=length(randseqorflengths)) #incrementa os comprimentos das ORFs encontradas no final do vetor randseqorflengths
+     
+  }
+ graph <- par(mfrow = c(1,2)) #permite colocar dois histogramas lado a lado
+  {
+  bins <- seq(0,11000,50) # permite que cada barra dos histogramas tenha a mesma largura de forma a facilitar a comparação
+  hist(randseqorflengths, breaks=bins, col="red", xlim=c(0,1000))
+  hist(orflengths, breaks=bins, col="red", xlim=c(0,1000))
+}
+ 
+  }
+LRandomORF(echiseq)
+```
+
+
+
+```{r 10, echo=TRUE}
+#Mostra um gráfico das posições da maior ORF na seq inicial tendo em conta os quadros de leitura
+my_print_ORF<- function(sequence)
+  {
+     # Define os eixos do gráfico
+     x <- c(0,1608)
+     y <- c(0,0)
+     plot(x, y, ylim=c(0,3), type="l", axes=FALSE, xlab="Nucleotide", ylab="Reading frame", main="My ORF")
+     #Cria as linhas horizontais de divisão entre os quadros de leitura
+     segments(0,1,1608,1) 
+     segments(0,2,1608,2)
+     # Adiciona o eixo dos x na posição y=0
+     axis(1, pos=0)
+     # Coloca a legenda dos quadros de leitura no eixo dos y
+     text(0.9,0.5,"+1")
+     text(0.9,1.5,"+2")
+     text(0.9,2.5,"+3")
+     # faz um gráfico do maior ORF
+     x<-my_ORF(sequence)
+     orfstart<-x[[2]] #posição do códão de iniciação do ORF
+     orfstop<-x[[3]] #posição do códão de finalização do ORF
+     #Verifica em que quadro de leitura se encontra o nosso ORF
+     remainder <- (orfstart-1) %% 3 
+     if    (remainder == 0) #Quadro de leitura +1
+        {
+           rect(orfstart,0,orfstop,1,col="cyan",border="black")
+        }
+        else if (remainder == 1) #Quadro de leitura +2
+        {
+           rect(orfstart,1,orfstop,2,col="cyan",border="black")
+        }
+        else if (remainder == 2) #Quadro de leitura +3
+        {
+           rect(orfstart,2,orfstop,3,col="cyan",border="black")
+        }
+  }
+my_print_ORF(echiseq)
+```
+
+
+```{r 11, echo=FALSE}
+#França
+mylist <- list(length(echiseq), count(echiseq,1,freq=T))
+nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
+names(mylist)<-nomes
+print(mylist)
+pie(table(echiseq),col = c("tomato2","palegreen","lightblue1","khaki"), main="Densidade de nucleótidos da estirpe de França")
+legend("bottomleft",legend=count(echiseq,1,freq=T),bty="n",fill=c("tomato2","palegreen","lightblue1","khaki"))
+```
+
+```{r 12 , echo=FALSE}
+#usa
+echi_usa <- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_usa.fasta")
+echi_usaseq <- echi_usa[[1]]
+mylist <- list(length(echi_usaseq), count(echi_usaseq,1,freq=T))
+nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
+names(mylist)<-nomes
+print(mylist)
+pie(table(echi_usaseq),col = c("tomato2","palegreen","lightblue1","khaki"), main="Densidade de nucleótidos da estirpe dos EUA")
+legend("bottomleft",legend=count(echi_usaseq,1,freq=T),bty="n",fill=c("tomato2","palegreen","lightblue1","khaki"))
+```
+
+```{r 13, echo=FALSE}
+#China
+echi_china <- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_china.fasta")
+echi_chinaseq <- echi_china[[1]]
+mylist <- list(length(echi_chinaseq), count(echi_chinaseq,1,freq=T))
+nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
+names(mylist)<-nomes
+print(mylist)
+pie(table(echi_chinaseq),col = c("tomato2","palegreen","lightblue1","khaki"), main="Densidade de nucleótidos da estirpe da China")
+legend("bottomleft",legend=count(echi_chinaseq,1,freq=T),bty="n",fill=c("tomato2","palegreen","lightblue1","khaki"))
+```
+
+```{r 14, echo=FALSE}
+#eslováquia
+echi_eslov <- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_eslováquia.fasta")
+echi_eslovseq <- echi_eslov[[1]]
+mylist <- list(length(echi_eslovseq), count(echi_eslovseq,1,freq=F))
+nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
+names(mylist)<-nomes
+print(mylist)
+pie(table(echi_eslovseq),col = c("tomato2","palegreen","lightblue1","khaki"), main="Densidade de nucleótidos da estirpe da Eslováquia")
+legend("bottomleft",legend=count(echi_eslovseq,1,freq=T),bty="n",fill=c("tomato2","palegreen","lightblue1","khaki"))
+```
+
+```{r 15 , echo=FALSE}
+#cazaquistão
+echi_kazak <- read.fasta("C:/Users/marif/Desktop/1180909_1180600/echi_kazak.fasta")
+echi_kazakseq <- echi_kazak[[1]]
+mylist <- list(length(echi_kazakseq), count(echi_kazakseq,1,freq=F))
+nomes<-c("Tamanho da sequência:", "Densidade nucleotídica:")
+names(mylist)<-nomes
+print(mylist)
+pie(table(echi_kazakseq),col = c("tomato2","palegreen","lightblue1","khaki"), main="Densidade de nucleótidos da estirpe do Cazaquistão")
+legend("bottomleft",legend=count(echi_kazakseq,1,freq=T),bty="n",fill=c("tomato2","palegreen","lightblue1","khaki"))
+```
+
+```{r 16, echo=TRUE}
+#Permite fazer gráficos consoante o tipo que se pretende (GC, AT, GC-AT, ACGT)
+my_SW<- function(sequence,tam,type)
+{
+  
+  starts <- seq(1, length(sequence)-tam) #Gera uma sequência com incremento de 1, a começar no 1 até ao tamanho da sequência inserida (parâmetro sequence) menos o tamanho da sliding window escolhida (parâmetro tam)
+  n <- length(starts) 
+  chunkGCs <- numeric(n)
+  chunkATs <- numeric(n)
+  chunkGs <- numeric(n) 
+  chunkCs <- numeric(n)
+  chunkTs <- numeric(n)
+  chunkAs <- numeric(n)
+  
+  for (i in 1:n) {
+    chunk <- sequence[starts[i]:(starts[i]+tam-1)]# vai cortando a nossa sequência no tamanho da sliding window escolhida (parâmetro tam) (sendo os dois primeiros ciclos for do 1 ao [1+100-1=]100, do 2 ao [2+100-1=]101, estando assim a analisar a nossa sequência de 100 em 100, a janela escolhida nas funções abaixo)
+    chunkGC <- GC(chunk) #Guarda a frequência de GC
+    chunkGCs[i] <- chunkGC
+    chunkAT <- count(chunk,1,freq=T)["a"]+count(chunk,1,freq=T)["t"] #Guarda a frequência de AT
+    chunkATs[i] <- chunkAT
+    chunkG <- count(chunk,1,freq=T)["g"] #Guarda a frequência de G
+    chunkC <- count(chunk,1,freq=T)["c"] #Guarda a frequência de C
+    chunkA <- count(chunk,1,freq=T)["a"] #Guarda a frequência de A
+    chunkT <- count(chunk,1,freq=T)["t"] #Guarda a frequência de T
+    chunkGs[i] <- chunkG
+    chunkCs[i] <- chunkC
+    chunkCs[i] <- chunkC
+    chunkAs[i] <- chunkA
+    chunkTs[i] <- chunkT
+  }
+  #gráfico da frequência de bases (GC) 
+  if (type== "GC" | type== "gc")
+  {
+  
+    plot(starts,chunkGCs,type="l",xlab="Nucleotide start position",ylab="GC content",col = "red")
+  legend("topright", legend = c("GC"), text.col = c("red"),box.lty=0,horiz=T)
+  }
+  
+  #gráfico da frequência de bases (AT) 
+  if (type== "AT" | type== "at")
+  {
+  plot(starts,chunkATs,type="l",xlab="Nucleotide start position",ylab="AT content",col = "blue")
+  legend("topright", legend = c("AT"), text.col = c("blue"),box.lty=0,horiz=T)
+  }
+  
+  #gráfico de cada base(AT,GC)
+  if (type== "AT-GC" | type== "at-gc")
+  {
+  lim2 <- max(chunkGCs,chunkATs)
+  lim1 <- min(chunkGCs,chunkATs)
+  plot(starts,chunkGCs,ylim=range(c(lim1,lim2)),type="l",xlab="",ylab="", col = "red")
+  par(new=TRUE)
+  plot(starts,chunkATs,ylim=range(c(lim1,lim2)),type="l",xlab="",ylab="", col = "blue")
+  legend("topright", legend = c("GC", "AT"), text.col = c("red","blue"),box.lty=0,horiz=T)
+  }
+  
+  #gráfico de cada base(A,C,T,G)
+  if(type=="ATCG" | type== "atcg")
+  {
+  lim2 <- max(chunkGs,chunkCs,chunkTs,chunkAs)
+  lim1 <- min(chunkGs,chunkCs,chunkTs,chunkAs)
+  plot(starts,chunkGs,ylim=range(c(lim1,lim2)),type="l",xlab="",ylab="", col = "red")
+  par(new=TRUE)
+  plot(starts,chunkCs,ylim=range(c(lim1,lim2)),type="l",xlab="",ylab="", col = "green")
+  par(new=TRUE)
+  plot(starts,chunkTs,ylim=range(c(lim1,lim2)),type="l",xlab="",ylab="", col = "blue")
+  par(new=TRUE)
+  plot(starts,chunkAs,ylim=range(c(lim1,lim2)),type="l",xlab="",ylab="", col = "yellow")
+  legend("topright", legend = c("G","C","T", "A"), text.col = c("red","green","blue","yellow"),box.lty=0,horiz=T)
+  }
+  
+}
+```
+
+```{r 17, echo=FALSE}
+#Echinococcus (frança)
+my_SW(echiseq,100,"gc")#o tam é a sliding window
+my_SW(echiseq,100,"AT")
+my_SW(echiseq,100,"AT-GC")
+my_SW(echiseq,100,"ATCG")
+```
+
+```{r 18 , echo=FALSE}
+#Usa
+my_SW(echi_usaseq,100,"gc")
+my_SW(echi_usaseq,100,"AT")
+my_SW(echi_usaseq,100,"AT-GC")
+my_SW(echi_usaseq,100,"ATCG")
+```
+
+```{r 19, echo=FALSE}
+#China
+my_SW(echi_chinaseq,100,"gc")
+my_SW(echi_chinaseq,100,"AT")
+my_SW(echi_chinaseq,100,"AT-GC")
+my_SW(echi_chinaseq,100,"ATCG")
+```
+
+```{r 20, echo=FALSE}
+#Eslováquia
+my_SW(echi_eslovseq,100,"gc")
+my_SW(echi_eslovseq,100,"AT")
+my_SW(echi_eslovseq,100,"AT-GC")
+my_SW(echi_eslovseq,100,"ATCG")
+```
+
+```{r 20.1, echo=FALSE}
+#Cazaquistão
+my_SW(echi_kazakseq,100,"gc")
+my_SW(echi_kazakseq,100,"AT")
+my_SW(echi_kazakseq,100,"AT-GC")
+my_SW(echi_kazakseq,100,"ATCG")
+```
+
+
+
+
+```{r 21, echo=TRUE}
+#A função calcula a estatística rho
+rho <-function(sequence)
+{ fgc<-count(sequence,2,freq=T)["gc"]
+ fg<-count(sequence,1, freq=T)["g"]
+ fc<-count(sequence,1, freq=T)["c"]
+ rhoGC<-fgc/(fg*fc)
+ 
+ fat<-count(sequence,2,freq=T)["at"]
+ fa<-count(sequence,1, freq=T)["a"]
+ ft<-count(sequence,1, freq=T)["t"]
+ rhoAT<-fat/(fa*ft)
+ mylist<-list(rhoGC,rhoAT)
+ return(mylist)
+}
+```
+
+```{r 22, echo=FALSE}
+#França
+rho(echiseq)
+```
+
+```{r 23 , echo=FALSE}
+#Usa
+rho(echi_usaseq)
+```
+
+
+
+```{r 24, echo=FALSE}
+#China
+rho(echi_chinaseq)
+```
+
+
+
+```{r 25 , echo=FALSE}
+#Eslováquia
+rho(echi_eslovseq)
+```
+
+
+```{r 26 , echo=FALSE}
+#Cazaquistão
+rho(echi_kazakseq)
+```
+
+```{r 27 , echo=FALSE}
+dotPlot(echi_usaseq, echiseq,wsize = 3, wstep = 3, nmatch =3)
+dotPlot(echi_chinaseq, echiseq,wsize = 3, wstep = 3, nmatch =3)
+dotPlot(echi_eslovseq, echiseq,wsize = 3, wstep = 3, nmatch =3)
+dotPlot(echi_kazakseq, echiseq,wsize = 3, wstep = 3, nmatch =3)
+
+```
+
+```{r 28, echo=FALSE}
+dotPlot(echi_usaseq, echi_chinaseq,wsize = 3, wstep = 3, nmatch =3)
+dotPlot(echi_usaseq, echi_eslovseq,wsize = 3, wstep = 3, nmatch =3)
+dotPlot(echi_usaseq, echi_kazakseq,wsize = 3, wstep = 3, nmatch =3)
+dotPlot(echi_chinaseq, echi_eslovseq,wsize = 3, wstep = 3, nmatch =3)
+dotPlot(echi_chinaseq, echi_kazakseq,wsize = 3, wstep = 3, nmatch =3)
+dotPlot(echi_eslovseq, echi_kazakseq,wsize = 3, wstep = 3, nmatch =3)
+```
+
+
+```{r 29 , echo=TRUE}
+#Esta função permite obter a pontuação de alinhamento global de duas seq inseridas
+Alignment<-function(s1,s2)
+{
+seq1<-toupper(c2s(s1))#Coloca em letra maiúscula os nucleotidos da seq, uma vez que o sigma utiliza letras maiúsculas
+seq2<-toupper(c2s(s2))
+sigma <- nucleotideSubstitutionMatrix(match = 1, mismatch = -1, baseOnly = TRUE, type = "DNA")
+score<-pairwiseAlignment(seq1, seq2, substitutionMatrix = sigma, gapOpening = -2, gapExtension = -1, type="global", scoreOnly = T)
+return(score)
+}
+
+```
+
+```{r 30, echo=FALSE}
+#Comparação echi(frança) com cada uma das outras regiões
+#"Matriz de pontuação"
+sigma <- nucleotideSubstitutionMatrix(match = 1, mismatch = -1, baseOnly = TRUE, type = "DNA")
+print("Matriz de pontuação")
+sigma
+print(c("Pontuação obtida entre a estirpe da França e dos EUA:",Alignment(echiseq,echi_usaseq)))
+print(c("Pontuação obtida entre a estirpe da França e da China:",Alignment(echiseq,echi_chinaseq)))
+print(c("Pontuação obtida entre a estirpe da França e da Eslováquia:",Alignment(echiseq,echi_eslovseq)))
+print(c("Pontuação obtida entre a estirpe da França e do Cazaquistão:",Alignment(echiseq,echi_kazakseq)))
+
+
+
+```
+
+
+
+```{r 31, echo=FALSE}
+
+#Comparação das regiões entre si
+print(c("Pontuação obtida entre a estirpe dos EUA e da China:",Alignment(echi_usaseq,echi_chinaseq)))
+print(c("Pontuação obtida entre a estirpe dos EUA e da Eslováquia:",Alignment(echi_usaseq,echi_eslovseq)))
+print(c("Pontuação obtida entre a estirpe dos EUA e do Cazaquistão:",Alignment(echi_usaseq,echi_kazakseq)))
+print(c("Pontuação obtida entre a estirpe da China e da Eslováquia:",Alignment(echi_chinaseq,echi_eslovseq)))
+print(c("Pontuação obtida entre a estirpe da China e do Cazaquistão:",Alignment(echi_chinaseq,echi_kazakseq)))
+print(c("Pontuação obtida entre a estirpe da Eslováquia e do Cazaquistão:",Alignment(echi_eslovseq,echi_kazakseq)))
+
+```
+
+
+```{r 32, echo=TRUE}
+#A função permite criar um histograma com as pontuações de alinhamento correspondentes às sequências geradas aleatoriamente
+LRandomScores <- function(sequence1, sequence2)
+{
+  seqstring <- c2s(sequence1)
+  randomseqs <- generateSeqsWithMultinomialModel(seqstring,10)
+  randomscores <- double(10)
+  for (i in 1:10)
+  {
+    score <-Alignment(sequence2, randomseqs[i])
+    randomscores[i] <- score
+  }
+ 
+  hist(randomscores, col="red", xlab = )
+}
+```
+
+
+```{r 33 , echo=FALSE}
+#Comparação echi(frança) com cada uma das outras regiões
+LRandomScores(echiseq,echi_usaseq)
+LRandomScores(echiseq,echi_chinaseq)
+LRandomScores(echiseq,echi_eslovseq)
+LRandomScores(echiseq,echi_kazakseq)
+
+```
+
+```{r 34, echo=FALSE}
+#Comparação das regiões entre si
+LRandomScores(echi_usaseq,echi_chinaseq)
+LRandomScores(echi_usaseq,echi_eslovseq)
+LRandomScores(echi_usaseq,echi_kazakseq)
+LRandomScores(echi_chinaseq,echi_eslovseq)
+LRandomScores(echi_chinaseq,echi_kazakseq)
+LRandomScores(echi_eslovseq,echi_kazakseq)
+```
+
+
+```{r 35, echo=FALSE}
+alimultiplo <- read.alignment(file ="echi_china.phy",format = "phylip")
+
+
+```
+
+```{r 36, echo=TRUE}
+#Visualizar o alinhamento em blocos de tamanho chunksize
+printMultipleAlignment <- function(alignment, chunksize)
+  {
+     
+     require("Biostrings")
+     # Encontra o número de sequências no alinhamento (alimultiplo) 
+     numseqs <- alignment$nb
+     # Encontra o comprimento do alinhamento
+     alignmentlen <- nchar(alignment$seq[[1]])
+     starts <- seq(1, alignmentlen, by=chunksize) #cria uma seq do 1 até ao comprimento do alinhamento com passo definido pelo parâmetro chunksize
+     n <- length(starts)
+    aln <- vector()
+     lettersprinted <- vector()
+     for (j in 1:numseqs)
+     {
+        aln[j] <- alignment$seq[[j]]
+        lettersprinted[j] <- 0
+     }
+     # Imprime o alinhamento por blocos
+     for (i in 1:n) { 
+        for (j in 1:numseqs)
+        {
+           chunkseqjaln <- substring(aln[j], starts[i], starts[i]+chunksize-1) #divide a sequência em blocos
+           chunkseqjaln <- toupper(chunkseqjaln)
+           # Encontra os gaps na seq -> Estes comandos não são muito importantes para o alinhamento que estamos a estudar, visto que não apresenta gaps. No entanto, decidimos colocá-los em comentário porque podem ser úteis na análise de outro tipo de sequências
+           #gapsj <- countPattern("-",chunkseqjaln) 
+           # Calculate how many residues of the first sequence we have printed so far in the alignment:
+           lettersprinted[j] <- lettersprinted[j] + chunksize #- gapsj
+           print(paste(chunkseqjaln,lettersprinted[j]))
+        }
+        print(paste(' '))
+     }
+}
+printMultipleAlignment(alimultiplo,60)
+```
+
+```{r 37,echo=FALSE}
+#Matriz de distâncias
+
+#AB461413.1 - France
+#AB461415.1 - Kazakhstan
+#AB461419.1 - USA
+#AB461420.1 - China
+#AB461414.1 - Slovakia
+
+library("ape")
+equidistbin <- as.DNAbin(alimultiplo)
+equidist<- dist.dna(equidistbin) #Matriz de distâncias
+equidist
+ 
+```
+
+
+```{r 38, echo=TRUE}
+#Permite criar um gráfico que representa visualmente as distâncias genéticas entre as sequências em estudo
+fit <- cmdscale(equidist,eig=TRUE, k=2)
+x <- fit$points[,1] 
+y <- fit$points[,2]
+plot(x, y, main="Distâncias Genéticas", type="n")
+text(x, y, labels = row.names(equidistbin), cex=.5)
+```
+
+
+```{r 39, echo=TRUE }
+#Permite criar a árvore não enraizada
+unrootedNJtree <- function(alignment)
+  {
+    
+     require("ape")
+     require("seqinr")
+     # definir a função que faz a árvore através do algoritmo nj
+     makemytree <- function(alignmentmat)
+     {
+        alignment <- ape::as.alignment(alignmentmat)
+        alignmentbin <- as.DNAbin(alignment)
+        mydist <- dist.dna(alignmentbin) #calcula a matriz de distâncias
+        mytree <- nj(mydist)
+        return(mytree)
+     }
+     
+     mymat  <- as.matrix.alignment(alignment) #Converte um alinhamento numa matriz de carateres
+     mytree <- makemytree(mymat)
+     
+     myboot <- boot.phylo(mytree, mymat, makemytree, quiet = TRUE)#permite criar os valores de bootstrap
+     
+     plot.phylo(mytree,type="u")   # imprime a árvore
+     nodelabels(myboot,cex=0.7)    # imprime os valores de bootstrap
+     mytree$node.label <- myboot   # faz com que os valores de bootstrap fiquem nos nós da árvore
+     }
+unrootedNJtree(alimultiplo)
+
+
+```
+
+```{r 40 , echo=TRUE }
+#Permite criar a árvore enraizada
+rootedNJtree <- function(alignment, theoutgroup)
+  {
+     
+     require("ape")
+     require("seqinr")
+      # definir a função que faz a árvore através do algoritmo nj
+     makemytree <- function(alignmentmat, outgroup=`theoutgroup`)
+     {
+        alignment <- ape::as.alignment(alignmentmat)
+        alignmentbin <- as.DNAbin(alignment)
+        mydist <- dist.dna(alignmentbin)
+        mytree <- nj(mydist)
+        myrootedtree <- root(mytree, outgroup, r=TRUE)
+        return(myrootedtree)
+     }
+    
+     mymat  <- as.matrix.alignment(alignment) #Converte um alinhamento numa matriz de carateres
+     myrootedtree <- makemytree(mymat, outgroup=theoutgroup)
+     
+     myboot <- boot.phylo(myrootedtree, mymat, makemytree, quiet = TRUE) #permite criar os valores de bootstrap
+    
+     plot.phylo(myrootedtree, type="p" ) # imprime a árvore
+     nodelabels(myboot,cex=0.7)          # imprime os valores de bootstrap
+     myrootedtree$node.label <- myboot   # faz com que os valores de bootstrap fiquem nos nós da árvore
+     
+  }
+
+rootedNJtree(alimultiplo,"AB461420.1")
+
+```
+
+
+
+```{r 41, echo=TRUE }
+#Matriz de transmissão
+matrix_transmissao <- function(seq)
+{
+  starts <- seq(1, length(seq)-20, by = 20) #guarda as posições iniciais de cada grupo de 20 nucleotidos
+  starts_length <- length(starts)
+  vGC<-c()
+  vAT<-c()
+  #Determinar a freq de Gc em cada subsequencia de 20
+  for (i in 1:starts_length) {     
+    chunk <- seq[starts[i]:(starts[i]+19)]
+    chunkGC <- GC(chunk)
+    vGC <- append(vGC, chunkGC, after=length(vGC))
+  }
+  #Determinar a freq de AT em cada subsequencia de 20  
+  for (i in 1:starts_length) {
+    chunk <- seq[starts[i]:(starts[i]+19)]
+    chunkAT <- count(chunk,1,freq=T)["a"]+count(chunk,1,freq=T)["t"]
+    vAT <- append(vAT, chunkAT, after=length(vAT))
+  }
+  #Determinar qual o estado predominante em cada subseq
+  estado<-c()
+  for (i in 1:starts_length) {
+    GC_rico<-vGC[i]
+    AT_rico<-vAT[i]
+    if(GC_rico>AT_rico){
+      estado<-append(estado, "GC rico", after=length(estado))
+    }else{
+      estado<-append(estado, "AT rico", after=length(estado))
+    }
+  }      
+  estado_length<-length(estado)
+  gc_to_gc<-0
+  at_to_at<-0
+  gc_to_at<-0
+  at_to_gc<-0
+  #Conta o número de vezes q passa de um estado para outro tendo em conta as possibilidades acima
+  for (i in 2:estado_length) {
+    if(estado[i]=="GC rico"&&estado[i-1]==estado[i]){
+      gc_to_gc<-gc_to_gc+1
+    }
+    if(estado[i]=="GC rico"&&estado[i-1]!=estado[i]){
+      at_to_gc<-at_to_gc+1
+    }
+    
+    if(estado[i]=="AT rico"&&estado[i-1]==estado[i]){
+      at_to_at<-at_to_at+1
+    }
+    if(estado[i]=="AT rico"&&estado[i-1]!=estado[i]){
+      gc_to_at<-gc_to_at+1
+    }
+  }
+  #Total= nº de estados (cada estado é composto por 20 nucleotideos) da sequência princial 
+  total_AT<-at_to_gc+at_to_at
+  total_GC<-gc_to_gc+gc_to_at
+  ATrichprobs<-c((at_to_at/total_AT),(at_to_gc/total_AT))
+  GCrichprobs<-c((gc_to_at/total_GC),(gc_to_gc/total_GC))
+  states<- c("AT-rich", "GC-rich") 
+  thetransitionmatrix <- matrix(c(ATrichprobs, GCrichprobs), 2, 2, byrow = TRUE) 
+  rownames(thetransitionmatrix) <- states
+  colnames(thetransitionmatrix) <- states
+  return(list( thetransitionmatrix, estado))
+}
+```
+
+```{r 42,echo=TRUE }
+#Matriz de emissão
+matrix_emissao <- function(seq, estado)
+{
+  starts <- seq(1, length(seq)-20, by = 20) #guarda as posições iniciais de cada grupo de 20 nucleotidos
+  starts_length <- length(starts)
+  chunk<-c()
+  estado_length<-length(estado)
+  GC_rico<-c()
+  AT_rico<-c()
+  #Cria um vetor para o estado de GC rico e AT rico conforme a definição de estado da matriz de transmissão
+  for (i in 1:estado_length) {
+    chunk<-seq[starts[i]:(starts[i]+19)]
+    if((estado[i])=="GC rico"){
+      GC_rico<-append(GC_rico, chunk, after=length(GC_rico))
+    }else{
+      AT_rico<-append(AT_rico, chunk, after=length(AT_rico))
+    }
+  }
+  #Estado GC-rico
+  #Calcula a probabilidade de cada nucleótido no estado GC-rico(que contém todas as subsequencias GC-rico) (frequência do nucleotido/comprimento do estado)
+  GC_a<-count(GC_rico,1,freq=F)["a"]/length(GC_rico) 
+  GC_c<-count(GC_rico,1,freq=F)["c"]/length(GC_rico)
+  GC_g<-count(GC_rico,1,freq=F)["g"]/length(GC_rico)
+  GC_t<-count(GC_rico,1,freq=F)["t"]/length(GC_rico)
+  
+  #Estado AT-rico
+  #Calcula a probabilidade de cada nucleótido no estado AT-rico(que contém todas as subsequencias AT-rico) (frequência do nucleotido/comprimento do estado)
+  AT_a<-count(AT_rico,1,freq=F)["a"]/length(AT_rico)
+  AT_c<-count(AT_rico,1,freq=F)["c"]/length(AT_rico)
+  AT_g<-count(AT_rico,1,freq=F)["g"]/length(AT_rico)
+  AT_t<-count(AT_rico,1,freq=F)["t"]/length(AT_rico)
+  
+  
+  ATrichstateprobs<-c(AT_a,AT_c,AT_g,AT_t)
+  GCrichstateprobs<-c(GC_a,GC_c,GC_g,GC_t)
+  states<- c("AT-rich", "GC-rich")
+  nucleotides<- c("A", "C", "G", "T") 
+  theemissionmatrix <- matrix(c(ATrichstateprobs, GCrichstateprobs), 2, 4, byrow = TRUE)
+  rownames(theemissionmatrix) <- states
+  colnames(theemissionmatrix) <- nucleotides
+  return(list(theemissionmatrix,ATrichstateprobs,GCrichstateprobs))
+}
+
+```
+
+```{r 43,echo=FALSE }
+print("Matriz de transmissão")
+matrix_transmissao(echiseq)[[1]]
+estado<-matrix_transmissao(echiseq)[[2]]
+
+print("Matriz de emissão")
+matrix_emissao(echiseq, estado)[[1]]
+
+ATrichstateprobs<-matrix_emissao(echiseq,estado)[[2]]
+GCrichstateprobs<-matrix_emissao(echiseq,estado)[[3]]
+nucleotides<- c("A", "C", "G", "T")
+par(mfrow = c(1,2))
+pie(ATrichstateprobs,labels= nucleotides,radius = 0.6, col = c("tomato2","palegreen","lightblue1","khaki"), main="AT-rich")
+legend("bottomleft",legend=ATrichstateprobs,bty="n",fill=c("tomato2","palegreen","lightblue1","khaki"), cex = 0.8)
+pie(GCrichstateprobs,labels= nucleotides,radius = 0.6, col = c("tomato2","palegreen","lightblue1","khaki"), main="GC-rich")
+legend("bottomleft",legend=GCrichstateprobs,bty="n",fill=c("tomato2","palegreen","lightblue1","khaki"), cex = 0.8)
+```
+
+
+
+
+```{r 44, echo=TRUE }
+# Função que permite gerar uma sequência semelhante à nossa, recorrendo a um HMM
+generatehmmseq <- function(transitionmatrix, emissionmatrix, initialprobs, seqlength)
+  {
+     nucleotides<- c("A", "C", "G", "T")
+     states<- c("AT-rich", "GC-rich") 
+     mysequence<- character()
+     mystates<- character()
+     # Escolhe o estado inicial, mediante o parâmetro inserido (initialprobs)
+     firststate<- sample(states, 1, rep=TRUE, prob=initialprobs)
+     #Escolhe as probabilidades de cada nucleótido tendo em conta o estado inicial que foi escolhido
+     probabilities<- emissionmatrix[firststate,] #com firststate definimos a linha (AT ou GC rico) e com a vírgula e espaço estamos a mencionar todas as colunas
+     # Escolher o primeiro nucleótido, tendo em conta as probabilidades definidas em probabilities
+     firstnucleotide<- sample(nucleotides, 1, rep=TRUE, prob=probabilities)
+     mysequence[1]<- firstnucleotide # Guarda o primeiro nucleótido 
+     mystates[1]<- firststate # Guarda o estado do primeiro nucleótido
+
+    #Gera os restante nucleótido da sequêncica com base na previsão das matrizes      
+     for (i in 2:seqlength) #começa no 2 porque a 1ª posição já está definida
+     {
+        prevstate<- mystates[i-1]# Encontra o estado do nucleótido anterior
+        # Escolhe as probabilidades do nucleótido tendo em conta o prevstate
+        stateprobs<- transitionmatrix[prevstate,]
+        # Escolhe o estado do nuclótido tendo em conta as stateprobs
+        state<- sample(states, 1, rep=TRUE, prob=stateprobs)
+        # Escolhe as probabilidades de cada nucleótido tendo em conta o estado em que se encontra (state)
+        probabilities<- emissionmatrix[state,]
+        # Escolhe o nucleótido tendo em conta as probabilities
+        nucleotide<- sample(nucleotides, 1, rep=TRUE, prob=probabilities)
+        mysequence[i]<- nucleotide # Guarda o nucleótido
+        mystates[i] <- state # Guarda o estado
+     }
+     s<-toupper(echiseq)
+     for (i in 1:length(mysequence))
+     {
+        nucleotide<- mysequence[i]
+        state<- mystates[i]
+        print(paste("Posição", i, ", Estado", state, ", Nucleótido aleatório = ", nucleotide,", Nucleótido da sequência = ", s[[i]]))
+     }
+}
+theinitialprobs <- c(0.5, 0.5) 
+thetransitionmatrix<-matrix_transmissao(echiseq)[[1]]
+estado<-matrix_transmissao(echiseq)[[2]]
+theemissionmatrix<-matrix_emissao(echiseq, estado)[[1]]
+generatehmmseq( thetransitionmatrix, theemissionmatrix, theinitialprobs, 50)
+```
+
+
+
+
+```{r 45, echo=TRUE}
+#Retorna a matriz de viterbi
+makeViterbimat <- function(sequence, transitionmatrix, emissionmatrix)
+
+{
+     sequence <- toupper(sequence)
+     # Encontra o número de estados analisando a matriz de transmissão
+     numstates <- dim(transitionmatrix)[1]
+     # Faz uma matriz com o nº de linhas igual ao comprimento da sequência e o nº de colunas igual ao nº de estados
+     v <- matrix(NA, nrow = dim(transitionmatrix)[1], ncol = length(sequence))
+     # Coloca o valor das linhas da primeira coluna a 0
+     v[,1] <- 0
+     # Coloca o valor da posição (1,1) a 1
+     v[1,1] <- 1
+    # Preenche a matriz v
+      for (l in 2:length(sequence))
+      {
+        for (i in 1:numstates) 
+        {
+       
+        statelprobnucleotidei <- emissionmatrix[i,sequence[l]]
+
+        v[i,l] <- statelprobnucleotidei * max(v[,(l-1)] * transitionmatrix[,i])
+        }
+      } 
+     
+     return(v)
+     
+     
+  }
+thetransitionmatrix<-matrix_transmissao(echiseq)[[1]]
+estado<-matrix_transmissao(echiseq)[[2]]
+theemissionmatrix<-matrix_emissao(echiseq, estado)[[1]]
+makeViterbimat(echiseq[1:4], thetransitionmatrix, theemissionmatrix)
+
+```
+
+```{r 46, echo=TRUE}
+viterbi <- function(sequence, transitionmatrix, emissionmatrix)
+  
+  {
+     
+     states <- rownames(emissionmatrix)
+
+     # Atribui a matriz de Viterbi resultado de makeViterbimat, à variável v
+     v <- makeViterbimat(sequence, transitionmatrix, emissionmatrix)
+     #Calcula qual o máximo em cada coluna na matriz v
+     mostprobablestatepath <- apply(v, 2, function(x) which.max(x))
+     #Atribui o primeiro nucleotido da sequência ao prevnucleotide 
+     prevnucleotide <- sequence[1]
+     prevmostprobablestate <- mostprobablestatepath[1]
+     prevmostprobablestatename <- states[prevmostprobablestate]
+     startpos <- 1
+     # Imprime o estado do maior valor de cada coluna ao longo de toda a sequência (a partir do 2º nucleotido)
+     for (i in 2:length(sequence))
+     {
+        nucleotide <- sequence[i]
+        mostprobablestate <- mostprobablestatepath[i]
+        #Atribui o estado correspondente ao máximo encontrado
+        mostprobablestatename <- states[mostprobablestate]
+        #Verifica se o estado atual é diferente do estado anterior:
+        if (mostprobablestatename != prevmostprobablestatename)
+        {  #-se sim: imprime o conjunto anterior com o mesmo estado até este ser diferente
+           print(paste("Positions",startpos,"-",(i-1), "Most probable state = ", prevmostprobablestatename))
+           startpos <- i
+        }
+        prevnucleotide <- nucleotide
+        prevmostprobablestatename <- mostprobablestatename
+     }
+     print(paste("Positions",startpos,"-",i, "Most probable state = ", prevmostprobablestatename))
+}
+thetransitionmatrix<-matrix_transmissao(echiseq)[[1]]
+estado<-matrix_transmissao(echiseq)[[2]]
+theemissionmatrix<-matrix_emissao(echiseq, estado)[[1]]
+viterbi(echiseq,thetransitionmatrix, theemissionmatrix)
+```
+
+```{r 47 , echo=FALSE}
+#Echinococcus (frança)
+my_SW(echiseq,100,"AT-GC")#o tam é a sliding window
+```
+
+
+
+```{r 48, echo=TRUE }
+# Initial HMM
+thetransitionmatrix<-matrix_transmissao(echiseq)[[1]]
+thetransitionmatrix
+estado<-matrix_transmissao(echiseq)[[2]]
+theemissionmatrix<-matrix_emissao(echiseq, estado)[[1]]
+theemissionmatrix
+library("HMM")
+s<- toupper(echiseq)
+hmm = initHMM(c("AT-rich", "GC-rich"),c("A", "C", "G", "T"),transProbs=thetransitionmatrix,emissionProbs=theemissionmatrix)
+# Baum-Welch
+bw = baumWelch(hmm,s,10)
+print(bw$hmm)
+```
+ 
+
+
+
+
+
+
+
+
+
